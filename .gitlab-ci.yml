@@ -1,0 +1,42 @@
+stages:
+  - prebuild
+  - build
+  - test
+  - docs
+  - end_to_end
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+
+variables:
+  CARGO_HOME: "$CI_PROJECT_DIR/.cargo"
+  CARGO_INCREMENTAL: 0
+  DOCKER_IMAGE_NAME: $CI_REGISTRY_IMAGE/$CI_COMMIT_REF_SLUG
+  DOCKER_IMAGE_TAG: $CI_COMMIT_SHA
+  GIT_SUBMODULE_FORCE_HTTPS: "true"
+  GIT_SUBMODULE_STRATEGY: recursive
+
+reuse-lint:
+  stage: prebuild
+  image: python:latest
+  script:
+    - pip install reuse
+    - reuse lint
+
+cpp-clang-format:
+  image: debian:testing-slim
+  stage: prebuild
+  script:
+    - apt-get update && apt-get install -y clang-format git
+    - git-clang-format HEAD~1
+
+
+build-cpp:
+  image: debian:testing-slim
+  stage: build
+  script:
+    - apt-get update && apt-get install -y catch2 libcatch2-dev cmake capnproto pkg-config libcapnp-dev git build-essential
+    - cd database
+    - cmake .
+    - make -j4
