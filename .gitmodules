@@ -1,6 +1,6 @@
 [submodule "lib/hta"]
 	path = lib/hta
-	url = git@github.com:metricq/hta.git
+	url = https://github.com/metricq/hta.git
 [submodule "lib/cpp"]
 	path = lib/cpp
 	url = git@gitlab.seanergys.fz-juelich.de:software/seanerbus-cpp.git
