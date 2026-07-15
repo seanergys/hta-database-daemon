@@ -37,6 +37,5 @@ build-cpp:
   stage: build
   script:
     - apt-get update && apt-get install -y catch2 libcatch2-dev cmake capnproto pkg-config libcapnp-dev git build-essential
-    - cd database
     - cmake .
     - make -j4
