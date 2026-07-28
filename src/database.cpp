@@ -9,11 +9,9 @@
 #include <seanerbus/client/connection.hpp>
 #include <seanerbus/client/simple_event_loop.hpp>
 #include <seanerbus/helpers/resolve.hpp>
+#include <seanerbus/helpers/time_series.hpp>
 #include <seanerbus/internal/message.hpp>
 #include <seanerbus/msg/helpers.hpp>
-#include <seanerbus/msg/history_req_v1.hpp>
-#include <seanerbus/msg/history_res_v1.hpp>
-#include <seanerbus/msg/time_value_v1.hpp>
 
 #include <chrono>
 #include <exception>
@@ -23,13 +21,15 @@
 #include <variant>
 #include <vector>
 
+#include <seanerbus/msg/msg.capnp.h>
+
 #include "seanerbus/msg/msg.capnp.h"
 
 // Converts a single hta::Aggregate to a Dataplane Aggregate
-seanerbus::msg::Aggregate hta_aggr_to_sean_aggr(hta::Aggregate aggr)
+seanerbus::helpers::Aggregate hta_aggr_to_sean_aggr(hta::Aggregate aggr)
 {
 
-    seanerbus::msg::Aggregate res;
+    seanerbus::helpers::Aggregate res;
 
     res.minimum = aggr.minimum;
     res.maximum = aggr.maximum;
@@ -43,11 +43,11 @@ seanerbus::msg::Aggregate hta_aggr_to_sean_aggr(hta::Aggregate aggr)
 
 // Converts a vector of hta::Row's into a vector of timestamps and Aggregates as used by the
 // Dataplane
-std::pair<std::vector<int64_t>, std::vector<seanerbus::msg::Aggregate>>
+std::pair<std::vector<int64_t>, std::vector<seanerbus::helpers::Aggregate>>
 hta_rows_to_sean_aggr(std::vector<hta::Row> aggrs)
 {
 
-    auto res = std::make_pair(std::vector<int64_t>{}, std::vector<seanerbus::msg::Aggregate>{});
+    auto res = std::make_pair(std::vector<int64_t>{}, std::vector<seanerbus::helpers::Aggregate>{});
     for (const auto& aggr : aggrs)
     {
         res.first.emplace_back(aggr.time.time_since_epoch().count());
@@ -75,7 +75,7 @@ hta_time_values_to_sean_raws(std::vector<hta::TimeValue> rows)
 void sub_handler(seanerbus::client::Connection& conn, const seanerbus::Message& msg,
                  hta::Directory& dir)
 {
-    if (msg.payload.first == (uint64_t)::MessageTypes::TIME_VALUE_V1)
+    if (seanerbus::msg::is_payload_type<TimeValueV1>(msg.payload.first))
     {
         // Big ole try-catch(everything) block, because we do not want the DB to crash like ever.
         // @bielert1 assured me that exceptions only signal recoverable errors.
@@ -83,14 +83,18 @@ void sub_handler(seanerbus::client::Connection& conn, const seanerbus::Message& 
         // In case the consistency of the HTA is going awry, the HTA will explode far more violently
         try
         {
-            seanerbus::msg::TimeValueV1 tv(msg.payload);
+            capnp::MallocMessageBuilder msg_builder;
 
-            seanerbus::logging::debug("Inserting {}: {} for address {}", tv.time, tv.value,
-                                      msg.address.as_string());
+            seanerbus::msg::initMessageBuilderFromVec(msg_builder, msg.payload.second);
+
+            ::TimeValueV1::Reader rd = msg_builder.getRoot<::TimeValueV1>();
+
+            seanerbus::logging::debug("Inserting {}: {} for address {}", rd.getTime(),
+                                      rd.getValue(), msg.address.as_string());
             auto& metric = dir[std::string(msg.address.as_string())];
 
-            metric.insert(
-                hta::TimeValue{ hta::TimePoint(hta::Duration(tv.time)), (double)tv.value });
+            metric.insert(hta::TimeValue{ hta::TimePoint(hta::Duration(rd.getTime())),
+                                          (double)rd.getValue() });
             metric.flush();
         }
         catch (std::exception& e)
@@ -115,18 +119,26 @@ void history_req_handler(seanerbus::client::Connection& conn, const seanerbus::M
     {
         try
         {
-            auto req = seanerbus::msg::HistoryReqV1(msg.payload);
+            capnp::MallocMessageBuilder msg_builder;
 
-            auto start = hta::TimePoint(hta::duration_cast(std::chrono::nanoseconds(req.start)));
-            auto end = hta::TimePoint(hta::duration_cast(std::chrono::nanoseconds(req.end)));
+            seanerbus::msg::initMessageBuilderFromVec(msg_builder, msg.payload.second);
 
-            if (req.type == seanerbus::msg::HistoryType::AGGREGATE)
+            ::HistoryReqV1::Reader rd = msg_builder.getRoot<::HistoryReqV1>();
+
+            auto start =
+                hta::TimePoint(hta::duration_cast(std::chrono::nanoseconds(rd.getStartTime())));
+            auto end =
+                hta::TimePoint(hta::duration_cast(std::chrono::nanoseconds(rd.getEndTime())));
+
+            auto addr = seanerbus::Address(
+                seanerbus::Uuid(rd.getAddress().getLower(), rd.getAddress().getUpper()));
+            if (rd.getHistoryType() == HistoryType::AGGREGATE)
             {
                 seanerbus::logging::debug("Data from {} ({}-{}) requested (AGGREGATED)",
-                                          req.addr.as_string(), start.time_since_epoch().count(),
+                                          addr.as_string(), start.time_since_epoch().count(),
                                           end.time_since_epoch().count());
 
-                auto& metric = dir[req.addr.u_.as_string()];
+                auto& metric = dir[addr.as_string()];
 
                 auto aggr = hta_aggr_to_sean_aggr(metric.aggregate(start, end));
 
@@ -135,19 +147,28 @@ void history_req_handler(seanerbus::client::Connection& conn, const seanerbus::M
                     aggr.minimum, aggr.maximum, aggr.sum, aggr.count, aggr.integral,
                     aggr.activeTime);
 
-                conn.respond_to(msg,
-                                seanerbus::msg::HistoryResV1::make_aggr({}, { aggr }).to_capnp());
+                auto hist = seanerbus::helpers::History({}, { aggr });
+
+                capnp::MallocMessageBuilder msg_builder;
+
+                ::HistoryResV1::Builder tv_msg = msg_builder.initRoot<::HistoryResV1>();
+
+                auto history_bld = tv_msg.getOkOrErr().initOk();
+                hist.to_capnp(history_bld);
+
+                auto res = capnp::messageToFlatArray(msg_builder);
+                conn.respond_to(msg, seanerbus::msg::to_payload_pair(::HistoryResV1::TYPE, res));
             }
             else
             {
                 seanerbus::logging::debug("Data from {} ({}-{}) requested (TIMELINE)",
-                                          req.addr.as_string(), start.time_since_epoch().count(),
+                                          addr.as_string(), start.time_since_epoch().count(),
                                           end.time_since_epoch().count());
 
-                auto& metric = dir[req.addr.as_string()];
+                auto& metric = dir[addr.as_string()];
 
                 auto res = metric.retrieve_flex(
-                    start, end, hta::duration_cast(std::chrono::nanoseconds(req.interval_max)));
+                    start, end, hta::duration_cast(std::chrono::nanoseconds(rd.getIntervalMax())));
 
                 // Check if we are getting raw (hta::TimeValue in HTA speak) or aggregated
                 // (hta::Row) values
@@ -159,9 +180,17 @@ void history_req_handler(seanerbus::client::Connection& conn, const seanerbus::M
                     seanerbus::logging::debug("Got raw timeline result: {} items",
                                               raw_data.first.size());
 
-                    conn.respond_to(
-                        msg, seanerbus::msg::HistoryResV1::make_raw(raw_data.first, raw_data.second)
-                                 .to_capnp());
+                    auto hist = seanerbus::helpers::History(raw_data.first, raw_data.second);
+                    capnp::MallocMessageBuilder msg_builder;
+
+                    ::HistoryResV1::Builder tv_msg = msg_builder.initRoot<::HistoryResV1>();
+
+                    auto history_bld = tv_msg.getOkOrErr().initOk();
+                    hist.to_capnp(history_bld);
+
+                    auto res = capnp::messageToFlatArray(msg_builder);
+                    conn.respond_to(msg,
+                                    seanerbus::msg::to_payload_pair(::HistoryResV1::TYPE, res));
                 }
                 else
                 {
@@ -170,9 +199,18 @@ void history_req_handler(seanerbus::client::Connection& conn, const seanerbus::M
                     seanerbus::logging::debug("Got aggregated timeline result: {} items",
                                               aggr_data.first.size());
 
-                    conn.respond_to(msg, seanerbus::msg::HistoryResV1::make_aggr(aggr_data.first,
-                                                                                 aggr_data.second)
-                                             .to_capnp());
+                    auto hist = seanerbus::helpers::History(aggr_data.first, aggr_data.second);
+
+                    capnp::MallocMessageBuilder msg_builder;
+
+                    ::HistoryResV1::Builder tv_msg = msg_builder.initRoot<::HistoryResV1>();
+
+                    auto history_bld = tv_msg.getOkOrErr().initOk();
+                    hist.to_capnp(history_bld);
+
+                    auto res = capnp::messageToFlatArray(msg_builder);
+                    conn.respond_to(msg,
+                                    seanerbus::msg::to_payload_pair(::HistoryResV1::TYPE, res));
                 }
             }
         }
@@ -180,10 +218,14 @@ void history_req_handler(seanerbus::client::Connection& conn, const seanerbus::M
         {
             seanerbus::logging::warn("Servicing HistoryReqV1 failed: {}", e.what());
 
-            conn.respond_to(
-                msg, seanerbus::msg::HistoryResV1::make_error(
-                         fmt::format("Got exception from HTA Time-Series Database: {}", e.what()))
-                         .to_capnp());
+            capnp::MallocMessageBuilder msg_builder;
+
+            ::HistoryResV1::Builder tv_msg = msg_builder.initRoot<::HistoryResV1>();
+
+            tv_msg.getOkOrErr().setErr(
+                fmt::format("Got exception from HTA Time-Series Database: {}", e.what()));
+            auto res = capnp::messageToFlatArray(msg_builder);
+            conn.respond_to(msg, seanerbus::msg::to_payload_pair(::HistoryResV1::TYPE, res));
         }
     }
     else
@@ -192,8 +234,14 @@ void history_req_handler(seanerbus::client::Connection& conn, const seanerbus::M
             "Client {}: expected HistoryResV1, got {} instead. Answering with error",
             msg.from->u_.as_string(), seanerbus::msg::payload_type_to_str(msg.payload.first));
 
-        conn.respond_to(msg,
-                        seanerbus::msg::HistoryResV1::make_error("Not a HistoryReqV1!").to_capnp());
+        capnp::MallocMessageBuilder msg_builder;
+
+        ::HistoryResV1::Builder tv_msg = msg_builder.initRoot<::HistoryResV1>();
+
+        tv_msg.getOkOrErr().setErr("Not a HistoryReqV1!");
+
+        auto res = capnp::messageToFlatArray(msg_builder);
+        conn.respond_to(msg, seanerbus::msg::to_payload_pair(::HistoryResV1::TYPE, res));
     }
 }
 
