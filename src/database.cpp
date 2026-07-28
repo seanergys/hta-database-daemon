@@ -72,7 +72,8 @@ hta_time_values_to_sean_raws(std::vector<hta::TimeValue> rows)
     return res;
 }
 
-void sub_handler(seanerbus::client::Connection& conn, seanerbus::Message msg, hta::Directory* dir)
+void sub_handler(seanerbus::client::Connection& conn, const seanerbus::Message& msg,
+                 hta::Directory& dir)
 {
     if (msg.payload.first == (uint64_t)::MessageTypes::TIME_VALUE_V1)
     {
@@ -86,7 +87,7 @@ void sub_handler(seanerbus::client::Connection& conn, seanerbus::Message msg, ht
 
             seanerbus::logging::debug("Inserting {}: {} for address {}", tv.time, tv.value,
                                       msg.address.as_string());
-            auto& metric = (*dir)[std::string(msg.address.as_string())];
+            auto& metric = dir[std::string(msg.address.as_string())];
 
             metric.insert(
                 hta::TimeValue{ hta::TimePoint(hta::Duration(tv.time)), (double)tv.value });
@@ -107,8 +108,8 @@ void sub_handler(seanerbus::client::Connection& conn, seanerbus::Message msg, ht
 }
 
 // Handler for HistoryReqV1
-void history_req_handler(seanerbus::client::Connection& conn, seanerbus::Message msg,
-                         hta::Directory* dir)
+void history_req_handler(seanerbus::client::Connection& conn, const seanerbus::Message& msg,
+                         hta::Directory& dir)
 {
     if (msg.payload.first == (uint64_t)::MessageTypes::HISTORY_REQ_V1)
     {
@@ -125,7 +126,7 @@ void history_req_handler(seanerbus::client::Connection& conn, seanerbus::Message
                                           req.addr.as_string(), start.time_since_epoch().count(),
                                           end.time_since_epoch().count());
 
-                auto& metric = (*dir)[req.addr.u_.as_string()];
+                auto& metric = dir[req.addr.u_.as_string()];
 
                 auto aggr = hta_aggr_to_sean_aggr(metric.aggregate(start, end));
 
@@ -143,7 +144,7 @@ void history_req_handler(seanerbus::client::Connection& conn, seanerbus::Message
                                           req.addr.as_string(), start.time_since_epoch().count(),
                                           end.time_since_epoch().count());
 
-                auto& metric = (*dir)[req.addr.as_string()];
+                auto& metric = dir[req.addr.as_string()];
 
                 auto res = metric.retrieve_flex(
                     start, end, hta::duration_cast(std::chrono::nanoseconds(req.interval_max)));
@@ -238,7 +239,9 @@ int main(void)
     for (auto metric : metrics)
     {
         seanerbus::logging::debug("subscribing to {}", metric.as_string());
-        conn.subscribe(metric, sub_handler, &dir);
+        conn.subscribe(metric, [&dir](seanerbus::client::Connection& conn, const auto& msg) {
+            sub_handler(conn, msg, dir);
+        });
     }
 
     auto history_req_addr = seanerbus::Address();
@@ -247,11 +250,13 @@ int main(void)
                              history_req_addr.as_string());
 
     // Register address for HistoryReqV1 req/res
-    conn.register_endpoint(history_req_addr, history_req_handler, &dir);
+    conn.register_endpoint(history_req_addr, [&dir](auto& conn, const auto& msg) {
+        history_req_handler(conn, msg, dir);
+    });
 
     // Register us a {"service" : "time_series_db"} to the naming serve, so that we can be found
     seanerbus::helpers::register_resolve(conn, { { "service", "time_series_db" } },
-                                         history_req_addr);
+                                         history_req_addr, [](auto&, bool, const auto&) {});
 
     seanerbus::logging::debug("Entering Main Event Loop!");
     seanerbus::client::SimpleEventLoop sel(conn);
@@ -260,5 +265,5 @@ int main(void)
     seanerbus::logging::info("Database received SIGINT, shutting down...");
 
     conn.reset_shutdown();
-    seanerbus::helpers::unregister_resolve(conn, history_req_addr);
+    seanerbus::helpers::unregister_resolve(conn, history_req_addr, [](auto&, bool, const auto&) {});
 }
