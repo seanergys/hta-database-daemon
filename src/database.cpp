@@ -173,9 +173,10 @@ void history_req_handler(seanerbus::client::Connection& conn,
 
         if (!rd_res.ok())
         {
-            auto bd = seanerbus::msg::MessageBuilder<HistoryResV1>();
+            auto bd = seanerbus::msg::MessageBuilder<ErrorResV1>();
 
-            bd.builder().getOkOrErr().setErr("Not a HistoryReqV1!");
+            bd.builder().setErrorCode(static_cast<uint64_t>(ErrorCodeV1::WRONG_SCHEMA));
+            bd.builder().setWhat("Not a HistoryReqV1!");
 
             conn.respond_to(msg, bd.to_message(msg.address()));
 
@@ -212,7 +213,7 @@ void history_req_handler(seanerbus::client::Connection& conn,
 
                 seanerbus::msg::MessageBuilder<HistoryResV1> bd;
 
-                auto history_bld = bd.builder().getOkOrErr().initOk();
+                auto history_bld = bd.builder().initHist();
                 hist.to_capnp(history_bld);
 
                 conn.respond_to(msg, bd.to_message(msg.address()));
@@ -243,7 +244,7 @@ void history_req_handler(seanerbus::client::Connection& conn,
 
                     seanerbus::msg::MessageBuilder<HistoryResV1> bd;
 
-                    auto history_bld = bd.builder().getOkOrErr().initOk();
+                    auto history_bld = bd.builder().initHist();
                     hist.to_capnp(history_bld);
 
                     conn.respond_to(msg, bd.to_message(msg.address()));
@@ -259,7 +260,7 @@ void history_req_handler(seanerbus::client::Connection& conn,
 
                     seanerbus::msg::MessageBuilder<HistoryResV1> bd;
 
-                    auto history_bld = bd.builder().getOkOrErr().initOk();
+                    auto history_bld = bd.builder().initHist();
                     hist.to_capnp(history_bld);
 
                     conn.respond_to(msg, bd.to_message(msg.address()));
@@ -270,9 +271,9 @@ void history_req_handler(seanerbus::client::Connection& conn,
         {
             seanerbus::logging::warn("Servicing HistoryReqV1 failed: {}", e.what());
 
-            auto bd = seanerbus::msg::MessageBuilder<HistoryResV1>();
+            auto bd = seanerbus::msg::MessageBuilder<ErrorResV1>();
 
-            bd.builder().getOkOrErr().setErr(
+            bd.builder().setWhat(
                 fmt::format("Got exception from HTA Time-Series Database: {}", e.what()));
 
             conn.respond_to(msg, bd.to_message(msg.address()));
@@ -283,9 +284,10 @@ void history_req_handler(seanerbus::client::Connection& conn,
         seanerbus::logging::warn("Expected HistoryResV1, got {} instead. Answering with error",
                                  msg.payload_type_to_str());
 
-        auto bd = seanerbus::msg::MessageBuilder<HistoryResV1>();
+        auto bd = seanerbus::msg::MessageBuilder<ErrorResV1>();
 
-        bd.builder().getOkOrErr().setErr("Not a HistoryReqV1!");
+        bd.builder().setErrorCode(static_cast<uint64_t>(ErrorCodeV1::WRONG_SCHEMA));
+        bd.builder().setWhat("Not a HistoryReqV1!");
 
         conn.respond_to(msg, bd.to_message(msg.address()));
     }
