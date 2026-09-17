@@ -24,7 +24,7 @@
 #include "seanerbus/msg/message.hpp"
 #include "seanerbus/msg/msg.capnp.h"
 
-seanerbus::msg::Address history_req_addr;
+seanerbus::msg::Entity history_req_entity;
 
 namespace
 {
@@ -32,7 +32,7 @@ namespace
 void shutdown_action(seanerbus::client::Connection& conn,
                      seanerbus::Expected<void, seanerbus::Error> err)
 {
-    seanerbus::resolve::unregister_resolve(conn, history_req_addr, [](auto& conn, auto res) {});
+    seanerbus::resolve::unregister_resolve(conn, history_req_entity, [](auto& conn, auto res) {});
     conn.shutdown(err);
 }
 
@@ -131,9 +131,9 @@ void sub_handler(seanerbus::client::Connection& conn,
         // In case the consistency of the HTA is going awry, the HTA will explode far more violently
         try
         {
-            seanerbus::logging::debug("Inserting {}: {} for address {}", rd.reader().getTime(),
-                                      rd.reader().getValue(), msg.address().as_string());
-            auto& metric = dir[std::string(msg.address().as_string())];
+            seanerbus::logging::debug("Inserting {}: {} for entity {}", rd.reader().getTime(),
+                                      rd.reader().getValue(), msg.entity().as_string());
+            auto& metric = dir[std::string(msg.entity().as_string())];
 
             metric.insert(hta::TimeValue{ hta::TimePoint(hta::Duration(rd.reader().getTime())),
                                           (double)rd.reader().getValue() });
@@ -148,7 +148,7 @@ void sub_handler(seanerbus::client::Connection& conn,
     {
         seanerbus::logging::warn(
             "Expected a TimeValueV1 from subscription to {}, got {} instead. Ignoring!",
-            (uint64_t)MessageTypes::TIME_VALUE_V1, msg.address().as_string(),
+            (uint64_t)MessageTypes::TIME_VALUE_V1, msg.entity().as_string(),
             msg.payload_type_to_str());
     }
 }
@@ -178,7 +178,7 @@ void history_req_handler(seanerbus::client::Connection& conn,
             bd.builder().setErrorCode(static_cast<uint64_t>(ErrorCodeV1::WRONG_SCHEMA));
             bd.builder().setWhat("Not a HistoryReqV1!");
 
-            conn.respond_to(msg, bd.to_message(msg.address()));
+            conn.respond_to(msg, bd.to_message(msg.entity()));
 
             return;
         }
@@ -191,16 +191,16 @@ void history_req_handler(seanerbus::client::Connection& conn,
             auto end = hta::TimePoint(
                 hta::duration_cast(std::chrono::nanoseconds(rd.reader().getEndTime())));
 
-            auto addr = seanerbus::msg::Address(seanerbus::msg::Uuid(
-                rd.reader().getAddress().getUpper(), rd.reader().getAddress().getLower()));
+            auto entity = seanerbus::msg::Entity(seanerbus::msg::Uuid(
+                rd.reader().getEntity().getUpper(), rd.reader().getEntity().getLower()));
 
             if (rd.reader().getHistoryType() == HistoryType::AGGREGATE)
             {
                 seanerbus::logging::debug("Data from {} ({}-{}) requested (AGGREGATED)",
-                                          addr.as_string(), start.time_since_epoch().count(),
+                                          entity.as_string(), start.time_since_epoch().count(),
                                           end.time_since_epoch().count());
 
-                auto& metric = dir[addr.as_string()];
+                auto& metric = dir[entity.as_string()];
 
                 auto aggr = hta_aggr_to_sean_aggr(metric.aggregate(start, end));
 
@@ -216,15 +216,15 @@ void history_req_handler(seanerbus::client::Connection& conn,
                 auto history_bld = bd.builder().initHist();
                 hist.to_capnp(history_bld);
 
-                conn.respond_to(msg, bd.to_message(msg.address()));
+                conn.respond_to(msg, bd.to_message(msg.entity()));
             }
             else
             {
                 seanerbus::logging::debug("Data from {} ({}-{}) requested (TIMELINE)",
-                                          addr.as_string(), start.time_since_epoch().count(),
+                                          entity.as_string(), start.time_since_epoch().count(),
                                           end.time_since_epoch().count());
 
-                auto& metric = dir[addr.as_string()];
+                auto& metric = dir[entity.as_string()];
 
                 auto res = metric.retrieve_flex(
                     start, end,
@@ -247,7 +247,7 @@ void history_req_handler(seanerbus::client::Connection& conn,
                     auto history_bld = bd.builder().initHist();
                     hist.to_capnp(history_bld);
 
-                    conn.respond_to(msg, bd.to_message(msg.address()));
+                    conn.respond_to(msg, bd.to_message(msg.entity()));
                 }
                 else
                 {
@@ -263,7 +263,7 @@ void history_req_handler(seanerbus::client::Connection& conn,
                     auto history_bld = bd.builder().initHist();
                     hist.to_capnp(history_bld);
 
-                    conn.respond_to(msg, bd.to_message(msg.address()));
+                    conn.respond_to(msg, bd.to_message(msg.entity()));
                 }
             }
         }
@@ -276,7 +276,7 @@ void history_req_handler(seanerbus::client::Connection& conn,
             bd.builder().setWhat(
                 fmt::format("Got exception from HTA Time-Series Database: {}", e.what()));
 
-            conn.respond_to(msg, bd.to_message(msg.address()));
+            conn.respond_to(msg, bd.to_message(msg.entity()));
         }
     }
     else
@@ -289,7 +289,7 @@ void history_req_handler(seanerbus::client::Connection& conn,
         bd.builder().setErrorCode(static_cast<uint64_t>(ErrorCodeV1::WRONG_SCHEMA));
         bd.builder().setWhat("Not a HistoryReqV1!");
 
-        conn.respond_to(msg, bd.to_message(msg.address()));
+        conn.respond_to(msg, bd.to_message(msg.entity()));
     }
 }
 
@@ -301,20 +301,20 @@ int main(void)
                       { "path", "./data" },
                       { "metrics", hta::json::object() } };
 
-    std::vector<seanerbus::msg::Address> metrics;
+    std::vector<seanerbus::msg::Entity> metrics;
     std::ifstream metrics_file("metrics.list");
 
     std::string line;
 
     while (std::getline(metrics_file, line))
     {
-        metrics.emplace_back(seanerbus::msg::Address(line));
+        metrics.emplace_back(seanerbus::msg::Entity(line));
     }
 
     if (metrics.empty())
     {
         std::cerr << "Need to define at least one metric to record\n";
-        std::cerr << "To record a metric, add a line with the UUID-Address of the metric to the "
+        std::cerr << "To record a metric, add a line with the UUID-Entity of the metric to the "
                      "file metrics.list!\n";
         return 1;
     }
@@ -340,19 +340,19 @@ int main(void)
         });
     }
 
-    history_req_addr = seanerbus::msg::Address();
+    history_req_entity = seanerbus::msg::Entity();
 
-    seanerbus::logging::info("Using address {} for HistoryReqV1 interface",
-                             history_req_addr.as_string());
+    seanerbus::logging::info("Using entity {} for HistoryReqV1 interface",
+                             history_req_entity.as_string());
 
-    // Register address for HistoryReqV1 req/res
-    conn.register_endpoint(history_req_addr, [&dir](auto& conn, const auto& msg) {
+    // Register entity for HistoryReqV1 req/res
+    conn.register_endpoint(history_req_entity, [&dir](auto& conn, const auto& msg) {
         history_req_handler(conn, msg, dir);
     });
 
     // Register us a {"service" : "time_series_db"} to the naming serve, so that we can be found
     seanerbus::resolve::register_resolve(conn, { { "service", "time_series_db" } },
-                                         history_req_addr, [](auto& conn, auto err) {
+                                         history_req_entity, [](auto& conn, auto err) {
                                              if (!err.ok())
                                              {
                                                  shutdown_action(conn, {});
