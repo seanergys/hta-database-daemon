@@ -330,7 +330,8 @@ int main(void)
     }
 
     hta::Directory dir(config, true);
-    seanerbus::client::Connection conn("demobus://localhost:5398", "demobus://localhost:5398");
+    seanerbus::client::Connection conn("seanerbroker://localhost:5398",
+                                       "seanerbroker://localhost:5398");
 
     for (auto metric : metrics)
     {
