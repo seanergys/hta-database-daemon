@@ -15,3 +15,7 @@ target_include_directories(db PRIVATE include)
 
 add_subdirectory(lib/hta)
 target_link_libraries(db PUBLIC hta)
+
+set_target_properties(db PROPERTIES OUTPUT_NAME seanerbus-hta-db)
+
+install(TARGETS db RUNTIME DESTINATION bin)
