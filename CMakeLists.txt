@@ -1,6 +1,6 @@
 # SPDX-FileCopyrightText: 2026 SEANERGYS Partners <https://seanergys.eu>
 #
-# SPDX-License-Identifier: MIT
+# SPDX-License-Identifier: Apache-2.0
 
 cmake_minimum_required(VERSION 3.11)
 project(seanerbus_db VERSION 0.0.1)
