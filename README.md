@@ -1,7 +1,7 @@
 <!--
 SPDX-FileCopyrightText: 2026 SEANERGYS Partners <https://seanergys.eu>
 
-SPDX-License-Identifier: MIT
+SPDX-License-Identifier: Apache-2.0
 -->
 
 # HTA database daemon
@@ -86,4 +86,4 @@ for now.
 
 ## License
 
-MIT, see [LICENSES/MIT.txt](LICENSES/MIT.txt).
+Apache-2.0, see [LICENSES/Apache-2.0.txt](LICENSES/Apache-2.0.txt).

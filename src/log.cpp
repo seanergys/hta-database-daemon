@@ -1,6 +1,6 @@
 // SPDX-FileCopyrightText: 2026 SEANERGYS Partners <https://seanergys.eu>
 //
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: Apache-2.0
 
 #include <log.hpp>
 
