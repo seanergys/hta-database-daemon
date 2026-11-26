@@ -352,7 +352,7 @@ int main(void)
     });
 
     // Register us a {"service" : "time_series_db"} to the naming serve, so that we can be found
-    seanerbus::resolve::register_resolve(conn, { { "service", "time_series_db" } },
+    seanerbus::resolve::register_resolve(conn, { { { "service", "time_series_db" } } },
                                          history_req_entity, [](auto& conn, auto err) {
                                              if (!err.ok())
                                              {
