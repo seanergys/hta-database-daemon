@@ -36,7 +36,7 @@ cmake --build build -j
 
 In an existing clone, `git submodule update --init --recursive` fetches the submodules.
 
-The result is `build/seanerbus-hta-db`. To install it into `<prefix>/bin`:
+The result is `build/hta-database-daemon`. To install it into `<prefix>/bin`:
 
 ```console
 cmake --install build --prefix <prefix>
@@ -71,7 +71,7 @@ Create `metrics.list` and start the daemon from the directory that should hold t
 ```console
 mkdir -p /var/lib/hta-database && cd /var/lib/hta-database
 echo 15a1a4c6-e83b-4699-bbdb-448b26edf1cc > metrics.list
-seanerbus-hta-db
+hta-database-daemon
 ```
 
 Without a `metrics.list` that lists at least one metric, it prints a message and exits with 1.
