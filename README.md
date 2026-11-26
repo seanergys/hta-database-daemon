@@ -1,93 +1,89 @@
-# SeanerBUS HTA time series database
+<!--
+SPDX-FileCopyrightText: 2026 SEANERGYS Partners <https://seanergys.eu>
 
+SPDX-License-Identifier: MIT
+-->
 
+# HTA database daemon
 
-## Getting started
+A SeanerBUS client that records metrics into an [HTA](https://github.com/metricq/hta)
+time series database and answers history requests for them.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+The daemon
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+- subscribes to every metric listed in `metrics.list` and stores the values it receives,
+- registers itself at the naming service as `{"service": "time_series_db"}`, so that other
+  clients can find it, and
+- answers `HistoryReqV1` requests with raw or aggregated values from the database.
 
-## Add your files
+## Building
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+### Requirements
 
+- a C++17 compiler, CMake 3.11 or newer, and `pkg-config`
+- Cap'n Proto (`capnproto` and its development files)
+- Git, to fetch the submodules
+
+The SeanerBUS C++ client (`lib/cpp`) and HTA (`lib/hta`) are Git submodules, and `lib/cpp` brings
+its own submodules (fmt and the message schemas). Fetch them all, then build:
+
+```console
+git clone --recurse-submodules git@gitlab.seanergys.fz-juelich.de:software/hta-database-daemon.git
+cd hta-database-daemon
+cmake -B build
+cmake --build build -j
 ```
-cd existing_repo
-git remote add origin https://gitlab.seanergys.fz-juelich.de/software/seanerbus-hta.git
-git branch -M main
-git push -uf origin main
+
+In an existing clone, `git submodule update --init --recursive` fetches the submodules.
+
+The result is `build/seanerbus-hta-db`. To install it into `<prefix>/bin`:
+
+```console
+cmake --install build --prefix <prefix>
 ```
 
-## Integrate with your tools
+### With Spack
 
-* [Set up project integrations](https://gitlab.seanergys.fz-juelich.de/software/seanerbus-hta/-/settings/integrations)
+[Seanerstack](https://gitlab.seanergys.fz-juelich.de/software/seanerstack) has a recipe for it:
 
-## Collaborate with your team
+```console
+spack install seanerbus-hta@main
+```
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+## Running
 
-## Test and Deploy
+The daemon needs a running SeanerBUS broker, which it expects at `seanerbroker://localhost:5398`.
+Start one first, for example with the `seanerbroker` of the SeanerBUS:
 
-Use the built-in continuous integration in GitLab.
+```console
+seanerbroker 127.0.0.1:5398
+```
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+The daemon takes no command line arguments. It reads and writes in its working directory:
 
-***
+| Path           | Purpose                                                                  |
+| -------------- | ------------------------------------------------------------------------ |
+| `metrics.list` | The metrics to record: one entity UUID per line. At least one is needed. |
+| `data/`        | The database. HTA creates it on the first start.                         |
 
-# Editing this README
+Create `metrics.list` and start the daemon from the directory that should hold the data:
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+```console
+mkdir -p /var/lib/hta-database && cd /var/lib/hta-database
+echo 15a1a4c6-e83b-4699-bbdb-448b26edf1cc > metrics.list
+seanerbus-hta-db
+```
 
-## Suggestions for a good README
+Without a `metrics.list` that lists at least one metric, it prints a message and exits with 1.
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+To find the database from another client, resolve `{"service": "time_series_db"}` at the naming
+service and send it a `HistoryReqV1`.
 
-## Name
-Choose a self-explaining name for your project.
+## Limitations
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
-
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
-
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+The broker address, the log level (`TRACE`) and the storage settings are fixed in `src/database.cpp`
+for now.
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+MIT, see [LICENSES/MIT.txt](LICENSES/MIT.txt).
